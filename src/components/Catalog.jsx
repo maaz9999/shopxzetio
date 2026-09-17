@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import PRODUCTS from '../data/products';
 import ProductCard from './ProductCard';
+import { useCatalog } from '../context/CatalogContext';
 
 export default function Catalog() {
+  const { products: PRODUCTS } = useCatalog();
   const [activeCategory, setActiveCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortOption, setSortOption] = useState('featured');
@@ -42,7 +43,7 @@ export default function Catalog() {
     }
 
     return result;
-  }, [activeCategory, searchQuery, sortOption]);
+  }, [PRODUCTS, activeCategory, searchQuery, sortOption]);
 
   return (
     <section id="catalog" style={{ padding: '30px 0 70px 0' }}>

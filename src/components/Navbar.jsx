@@ -1,8 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
+import AccountDropdown from './AccountDropdown';
 
 export default function Navbar({ onOpenCompat, onOpenTracker }) {
   const { totalItemsCount, openCart, currentView, setCurrentView } = useCart();
+  const { isCustomer, isAdmin, profile, logout } = useAuth();
+  const navigate = useNavigate();
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -18,6 +23,7 @@ export default function Navbar({ onOpenCompat, onOpenTracker }) {
   const handleNav = (viewName, hashTarget = null) => {
     setCurrentView(viewName);
     setMobileOpen(false);
+    if (window.location.pathname !== '/') navigate('/');
     if (hashTarget) {
       setTimeout(() => {
         const el = document.querySelector(hashTarget);
@@ -26,6 +32,11 @@ export default function Navbar({ onOpenCompat, onOpenTracker }) {
     } else {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
+  };
+
+  const handleTrackOrder = () => {
+    navigate(isCustomer && !isAdmin ? '/account/orders' : '/track-order');
+    setMobileOpen(false);
   };
 
   return (
@@ -92,17 +103,25 @@ export default function Navbar({ onOpenCompat, onOpenTracker }) {
 
             {/* Right: Clean Pro Actions */}
             <div className="pro-nav-actions">
-              {/* WhatsApp Support Button */}
+              {/* WhatsApp Support Icon Button */}
               <a 
                 href="https://wa.me/923348590229?text=Hello%20ShopXzetio!%20I%20have%20an%20inquiry%20regarding%20gaming%20gear." 
                 target="_blank" 
                 rel="noopener noreferrer" 
-                className="pro-btn-support"
+                className="pro-btn-support pro-btn-whatsapp-icon"
                 title="WhatsApp Support"
+                aria-label="WhatsApp Support"
               >
                 <i className="fa-brands fa-whatsapp"></i>
-                <span>Support</span>
               </a>
+
+              <div className="nav-account-actions">
+                {isAdmin
+                  ? <button className="nav-account-link" onClick={() => navigate('/admin')}><i className="fa-solid fa-shield-halved"/><span>Admin</span></button>
+                  : isCustomer
+                    ? <AccountDropdown profile={profile} onLogout={logout}/>
+                    : <button className="nav-account-link nav-signup" onClick={() => navigate('/login')} aria-label="Login or create an account" title="Login / Sign Up"><i className="fa-solid fa-user"/><span>Login / Sign Up</span></button>}
+              </div>
 
               {/* Minimalist Cart Button */}
               <button 
@@ -161,6 +180,11 @@ export default function Navbar({ onOpenCompat, onOpenTracker }) {
             </div>
 
             <div className="pro-mobile-nav">
+              <button className="pro-mobile-link-btn mobile-track-order" onClick={handleTrackOrder}><i className="fa-solid fa-box-location-dot"/> Track Order</button>
+              {isCustomer ? <>
+                <button className="pro-mobile-link-btn" onClick={() => { navigate(isAdmin ? '/admin' : '/account'); setMobileOpen(false); }}><i className={`fa-solid ${isAdmin ? 'fa-shield-halved' : 'fa-user'}`}/> {isAdmin ? 'Admin Portal' : 'My Account'}</button>
+                <button className="pro-mobile-link-btn" onClick={() => { logout(); setMobileOpen(false); }}><i className="fa-solid fa-right-from-bracket"/> Logout</button>
+              </> : <button className="pro-mobile-link-btn" onClick={() => { navigate('/login'); setMobileOpen(false); }}><i className="fa-solid fa-user"/> Login / Sign Up</button>}
               <button 
                 className={`pro-mobile-link-btn ${(!currentView || currentView === 'home') ? 'active' : ''}`}
                 onClick={() => handleNav('home')}

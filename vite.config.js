@@ -10,9 +10,10 @@ export default defineConfig({
       name: 'admin-and-mime-middleware',
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
-          // Route /admin or /admin/ to /admin.html
-          if (req.url === '/admin' || req.url === '/admin/') {
-            req.url = '/admin.html';
+          // Vite otherwise resolves /admin to the legacy admin.html file before
+          // React Router sees it. All application routes must use index.html.
+          if (req.url && /^\/admin(?:\/login)?\/?(?:\?.*)?$/.test(req.url)) {
+            req.url = '/index.html';
           }
           if (req.url && (req.url.endsWith('.js') || req.url.includes('.js?') || req.url.endsWith('.jsx') || req.url.includes('.jsx?'))) {
             res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
@@ -40,14 +41,6 @@ export default defineConfig({
     strictPort: true,
     open: false,
     host: true
-  },
-  build: {
-    rollupOptions: {
-      input: {
-        main: path.resolve(__dirname, 'index.html'),
-        admin: path.resolve(__dirname, 'admin.html')
-      }
-    }
   },
   resolve: {
     alias: {

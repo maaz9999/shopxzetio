@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import PRODUCTS from '../data/products';
 
 const CartContext = createContext();
 
@@ -43,11 +42,15 @@ export function CartProvider({ children }) {
   };
 
   const addToCart = (product, qty = 1) => {
+    if (product.stockQuantity === 0) {
+      showToast(`${product.shortName || product.name} is currently out of stock`);
+      return;
+    }
     setItems(prev => {
       const existing = prev.find(i => i.id === product.id);
       if (existing) {
         return prev.map(i => 
-          i.id === product.id ? { ...i, quantity: i.quantity + qty } : i
+          i.id === product.id ? { ...i, quantity: product.stockQuantity == null ? i.quantity + qty : Math.min(product.stockQuantity, i.quantity + qty) } : i
         );
       } else {
         return [...prev, {
@@ -56,7 +59,8 @@ export function CartProvider({ children }) {
           fullName: product.name,
           price: product.price,
           image: product.mainImage || (product.images && product.images[0]) || '',
-          quantity: qty
+          quantity: product.stockQuantity == null ? qty : Math.min(product.stockQuantity, qty),
+          stockQuantity: product.stockQuantity ?? null
         }];
       }
     });
@@ -70,7 +74,7 @@ export function CartProvider({ children }) {
       return prev.map(item => {
         if (item.id === productId) {
           const newQty = item.quantity + delta;
-          return newQty > 0 ? { ...item, quantity: newQty } : null;
+          return newQty > 0 ? { ...item, quantity: item.stockQuantity == null ? newQty : Math.min(item.stockQuantity, newQty) } : null;
         }
         return item;
       }).filter(Boolean);
@@ -148,7 +152,8 @@ export function CartProvider({ children }) {
       closeReel,
       currentView,
       setCurrentView,
-      toast
+      toast,
+      showToast
     }}>
       {children}
     </CartContext.Provider>

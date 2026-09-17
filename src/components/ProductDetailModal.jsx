@@ -159,7 +159,7 @@ export default function ProductDetailModal() {
                   <button 
                     className="qty-btn" 
                     type="button" 
-                    onClick={() => setQuantity(prev => prev + 1)}
+                    onClick={() => setQuantity(prev => product.stockQuantity == null ? prev + 1 : Math.min(product.stockQuantity, prev + 1))}
                     style={{ width: '34px', height: '36px', fontSize: '1.1rem' }}
                   >
                     +
@@ -170,8 +170,9 @@ export default function ProductDetailModal() {
               <button 
                 onClick={handleAddToCart} 
                 className="btn-cyber-primary cyber-cut-sm"
+                disabled={product.stockQuantity === 0}
               >
-                <i className="fa-solid fa-plus"></i> ADD TO ARMORY
+                <i className="fa-solid fa-plus"></i> {product.stockQuantity === 0 ? 'OUT OF STOCK' : 'ADD TO ARMORY'}
               </button>
 
               <button 

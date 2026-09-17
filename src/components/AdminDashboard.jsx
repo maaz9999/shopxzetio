@@ -1,19 +1,20 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
+import { supabase } from '../lib/supabase';
+import { PAYMENT_LABELS } from '../services/orders';
+import AdminProducts from './AdminProducts';
+import { AdminCustomers, AdminReviews } from './AdminManagement';
 
-const ADMIN_STORAGE_KEY = 'shopxzetio_order_history';
-const ADMIN_AUTH_KEY = 'shopxzetio_admin_session_v1';
-const MASTER_PIN = 'xzetio2026';
-const BACKUP_PIN = '923348';
+const ORDER_STATUS_LABELS = {
+  placed: 'Order Placed', confirmed: 'Confirmed', processing: 'Processing',
+  dispatched: 'Dispatched', delivered: 'Delivered', cancelled: 'Cancelled',
+};
 
 export default function AdminDashboard() {
   const { setCurrentView } = useCart();
-
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return sessionStorage.getItem(ADMIN_AUTH_KEY) === 'true';
-  });
-  const [pinInput, setPinInput] = useState('');
-  const [authError, setAuthError] = useState(false);
+  const { logout } = useAuth();
+  const [activeSection, setActiveSection] = useState('orders');
 
   const [orders, setOrders] = useState([]);
   const [activeFilter, setActiveFilter] = useState('all');
@@ -34,123 +35,72 @@ export default function AdminDashboard() {
   const [activeSSOrder, setActiveSSOrder] = useState(null);
   const [zoomLevel, setZoomLevel] = useState(1);
 
-  // Load orders
-  useEffect(() => {
-    if (isAuthenticated) {
-      try {
-        const stored = localStorage.getItem(ADMIN_STORAGE_KEY);
-        if (stored) {
-          setOrders(JSON.parse(stored));
-        } else {
-          const seeds = [
-            {
-              orderRef: 'SXZ-84291',
-              date: new Date(Date.now() - 3600000 * 2).toISOString(),
-              customer: {
-                fullName: 'Daniyal Tariq (i8 Scrims)',
-                email: 'daniyal.pubg@gmail.com',
-                whatsapp: '03008492019',
-                address: 'House 42, Block C, Gulberg III',
-                city: 'Lahore',
-                notes: 'Please dispatch urgently before PMNC tournament block.'
-              },
-              paymentMethod: 'COD + Rs. 500 Advance',
-              paymentCode: 'cod_advance',
-              items: [
-                { name: 'PIVA B2 Magnetic Semiconductor Mobile Cooler', price: 3850, quantity: 1 },
-                { name: 'ShopXzetio Esports Carbon-Silver Finger Sleeves (Pack of 5 Pairs)', price: 2000, quantity: 1 }
-              ],
-              subtotal: 5850,
-              shipping: 250,
-              total: 6100,
-              hasReceipt: true,
-              receiptDataUrl: '/assets/brand/HERO.png',
-              status: 'Receipt Submitted',
-              trackingNumber: 'TCS-928174201',
-              courier: 'TCS Pakistan'
-            },
-            {
-              orderRef: 'SXZ-79102',
-              date: new Date(Date.now() - 3600000 * 6).toISOString(),
-              customer: {
-                fullName: 'Farhan Zaidi',
-                email: 'farhan.z@yahoo.com',
-                whatsapp: '03219481102',
-                address: 'Apartment 5B, Creek Vistas, Phase VIII, DHA',
-                city: 'Karachi',
-                notes: 'Call before delivery.'
-              },
-              paymentMethod: 'Cash on Delivery (COD)',
-              paymentCode: 'cod',
-              items: [
-                { name: 'HyperX Cloud II Kingston Esports Headset', price: 12500, quantity: 1 }
-              ],
-              subtotal: 12500,
-              shipping: 0,
-              total: 12500,
-              hasReceipt: false,
-              receiptDataUrl: null,
-              status: 'Confirmed (COD)',
-              trackingNumber: '',
-              courier: 'Leopards Courier'
-            }
-          ];
-          setOrders(seeds);
-          localStorage.setItem(ADMIN_STORAGE_KEY, JSON.stringify(seeds));
-        }
-      } catch (e) {
-        console.error('Error loading orders', e);
+  const loadOrders = async () => {
+    const { data, error } = await supabase.from('orders').select('*, order_items(*), payments(*)').order('created_at', { ascending: false });
+    if (error) return triggerToast(error.message, 'fa-triangle-exclamation', 'danger');
+    const mapped = await Promise.all((data || []).map(async (o) => {
+      const payment = o.payments?.[0];
+      let receiptDataUrl = null;
+      if (payment?.receipt_path) {
+        const signed = await supabase.storage.from('payment-receipts').createSignedUrl(payment.receipt_path, 900);
+        receiptDataUrl = signed.data?.signedUrl || null;
       }
-    }
-  }, [isAuthenticated]);
-
-  const saveOrders = (updated) => {
-    setOrders(updated);
-    try {
-      localStorage.setItem(ADMIN_STORAGE_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.error(e);
-    }
+      return { id: o.id, orderRef: o.order_ref, date: o.created_at, customer: { fullName: o.customer_name, email: o.customer_email, whatsapp: o.customer_phone, address: o.address_line, city: o.city, notes: o.delivery_notes }, paymentMethod: PAYMENT_LABELS[o.payment_method], paymentCode: o.payment_method, items: o.order_items.map(i => ({ name: i.product_name, price: Number(i.unit_price), quantity: i.quantity })), subtotal: Number(o.subtotal), shipping: Number(o.shipping_amount), total: Number(o.total_amount), hasReceipt: Boolean(payment?.receipt_path), receiptDataUrl, paymentId: payment?.id, paymentStatus: payment?.status || o.payment_status, orderStatus: o.order_status, status: ORDER_STATUS_LABELS[o.order_status] || o.order_status, trackingNumber: o.tracking_number || '', courier: o.courier || '' };
+    }));
+    setOrders(mapped);
   };
 
-  const handleLogin = (e) => {
-    e.preventDefault();
-    if (pinInput.trim() === MASTER_PIN || pinInput.trim() === BACKUP_PIN) {
-      sessionStorage.setItem(ADMIN_AUTH_KEY, 'true');
-      setIsAuthenticated(true);
-      setAuthError(false);
-    } else {
-      setAuthError(true);
-      setPinInput('');
-    }
+  useEffect(() => { loadOrders(); }, []);
+
+  const handleLogout = async () => { await logout(); window.location.href = '/admin/login'; };
+
+  const updateOrderStatus = async (orderRef, dbStatus) => {
+    const order = orders.find(o => o.orderRef === orderRef);
+    let { error } = await supabase.rpc('admin_update_order', { p_order_id: order.id, p_order_status: dbStatus, p_message: `Order marked ${ORDER_STATUS_LABELS[dbStatus]}` });
+    if (error?.code === 'PGRST202') ({ error } = await supabase.from('orders').update({ order_status: dbStatus }).eq('id', order.id));
+    if (error) return triggerToast(error.message, 'fa-triangle-exclamation', 'danger');
+    await loadOrders();
+    triggerToast(`Order #${orderRef} updated to ${ORDER_STATUS_LABELS[dbStatus]}`, 'fa-arrows-rotate', 'info');
   };
 
-  const handleLogout = () => {
-    sessionStorage.removeItem(ADMIN_AUTH_KEY);
-    setIsAuthenticated(false);
-  };
-
-  const updateOrderStatus = (orderRef, newStatus) => {
-    const updated = orders.map(o => o.orderRef === orderRef ? { ...o, status: newStatus } : o);
-    saveOrders(updated);
-    triggerToast(`Order #${orderRef} updated to ${newStatus}`, 'fa-arrows-rotate', 'info');
-  };
-
-  const updateOrderTracking = (orderRef, tracking) => {
-    const updated = orders.map(o => o.orderRef === orderRef ? { ...o, trackingNumber: tracking } : o);
-    saveOrders(updated);
+  const updateOrderTracking = async (orderRef, tracking, courier) => {
+    const order = orders.find(o => o.orderRef === orderRef);
+    const nextCourier = courier || order.courier || 'TCS Pakistan';
+    let { error } = await supabase.rpc('admin_update_order', { p_order_id: order.id, p_courier: nextCourier, p_tracking_number: tracking, p_message: 'Courier details updated' });
+    if (error?.code === 'PGRST202') ({ error } = await supabase.from('orders').update({ tracking_number: tracking, courier: nextCourier }).eq('id', order.id));
+    if (error) return triggerToast(error.message, 'fa-triangle-exclamation', 'danger');
+    await loadOrders();
     triggerToast(`Tracking ID saved for #${orderRef}`, 'fa-truck-fast', 'info');
+  };
+
+  const updatePaymentStatus = async (order, paymentStatus) => {
+    let { error } = await supabase.rpc('admin_update_order', {
+      p_order_id: order.id,
+      p_order_status: paymentStatus === 'verified' && order.orderStatus === 'placed' ? 'confirmed' : null,
+      p_payment_status: paymentStatus,
+      p_message: paymentStatus === 'verified' ? 'Payment verified by ShopXzetio' : 'Payment receipt rejected',
+    });
+    if (error?.code === 'PGRST202') {
+      const paymentResult = await supabase.from('payments').update({ status: paymentStatus, amount_received: paymentStatus === 'verified' ? (order.paymentCode === 'cod_advance' ? 500 : order.total) : 0, verified_at: paymentStatus === 'verified' ? new Date().toISOString() : null }).eq('id', order.paymentId);
+      error = paymentResult.error;
+      if (!error) await supabase.from('orders').update({ payment_status: paymentStatus, ...(paymentStatus === 'verified' && order.orderStatus === 'placed' ? { order_status: 'confirmed' } : {}) }).eq('id', order.id);
+    }
+    if (error) return triggerToast(error.message, 'fa-triangle-exclamation', 'danger');
+    await loadOrders();
+    triggerToast(paymentStatus === 'verified' ? 'Payment verified.' : 'Payment receipt rejected.', paymentStatus === 'verified' ? 'fa-check-double' : 'fa-xmark', paymentStatus === 'verified' ? 'success' : 'danger');
   };
 
   const deleteOrder = (orderRef) => {
     setConfirmDeleteRef(orderRef);
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (confirmDeleteRef) {
-      const updated = orders.filter(o => o.orderRef !== confirmDeleteRef);
-      saveOrders(updated);
-      triggerToast(`Order #${confirmDeleteRef} permanently removed.`, 'fa-trash-can', 'danger');
+      const order = orders.find(o => o.orderRef === confirmDeleteRef);
+      const { error } = await supabase.from('orders').update({ order_status: 'cancelled' }).eq('id', order.id);
+      if (error) return triggerToast(error.message, 'fa-triangle-exclamation', 'danger');
+      await loadOrders();
+      triggerToast(`Order #${confirmDeleteRef} cancelled and retained for audit.`, 'fa-ban', 'danger');
       setConfirmDeleteRef(null);
     }
   };
@@ -171,44 +121,13 @@ export default function AdminDashboard() {
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank');
   };
 
-  const addManualOrder = () => {
-    const randomId = 'SXZ-' + Math.floor(10000 + Math.random() * 90000);
-    const newOrder = {
-      orderRef: randomId,
-      date: new Date().toISOString(),
-      customer: {
-        fullName: 'Daniyal Pro Gamer',
-        email: 'daniyal@gamer.pk',
-        whatsapp: '03348590229',
-        address: 'Sector F-7/2, Islamabad',
-        city: 'Islamabad',
-        notes: 'Manual test order created in admin dashboard.'
-      },
-      paymentMethod: 'COD + Rs. 500 Advance',
-      paymentCode: 'cod_advance',
-      items: [
-        { name: 'PIVA B3 Extreme Semiconductor Cooler', price: 4350, quantity: 1 }
-      ],
-      subtotal: 4350,
-      shipping: 250,
-      total: 4600,
-      hasReceipt: true,
-      receiptDataUrl: '/assets/brand/LOGO.png',
-      status: 'Receipt Submitted',
-      trackingNumber: '',
-      courier: 'TCS Pakistan'
-    };
-    saveOrders([newOrder, ...orders]);
-    triggerToast(`Order #${randomId} added to pipeline!`, 'fa-circle-check', 'success');
-  };
-
   const exportCSV = () => {
     if (orders.length === 0) {
       triggerToast('No orders available to export.', 'fa-file-excel', 'info');
       return;
     }
     let csv = 'Order Ref,Date,Customer Name,Phone,Email,City,Address,Total (PKR),Payment Method,Status,Has Receipt,Tracking Number\n';
-    orders.forEach(o => {
+    filteredOrders.forEach(o => {
       const cleanAddress = (o.customer.address || '').replace(/"/g, '""');
       csv += `"${o.orderRef}","${o.date}","${o.customer.fullName}","${o.customer.whatsapp}","${o.customer.email || ''}","${o.customer.city}","${cleanAddress}",${o.total},"${o.paymentMethod}","${o.status}","${o.hasReceipt ? 'YES' : 'NO'}","${o.trackingNumber || ''}"\n`;
     });
@@ -226,8 +145,8 @@ export default function AdminDashboard() {
 
   const filteredOrders = useMemo(() => {
     return orders.filter(o => {
-      if (activeFilter === 'receipts' && (!o.hasReceipt || o.status === 'Advance Verified')) return false;
-      if (activeFilter === 'verified' && o.status !== 'Advance Verified') return false;
+      if (activeFilter === 'receipts' && (!o.hasReceipt || o.paymentStatus !== 'receipt_submitted')) return false;
+      if (activeFilter === 'verified' && o.paymentStatus !== 'verified') return false;
       if (activeFilter === 'cod' && o.paymentCode !== 'cod') return false;
       if (activeFilter === 'dispatched' && o.status !== 'Dispatched') return false;
 
@@ -248,56 +167,13 @@ export default function AdminDashboard() {
     window.location.href = '/';
   };
 
-  // If locked, render Lock Screen
-  if (!isAuthenticated) {
-    return (
-      <div className="admin-lock-screen">
-        <div className="lock-card">
-          <div className="lock-avatar">
-            <i className="fa-solid fa-shield-halved"></i>
-          </div>
-          <h2 className="lock-title">OWNER COMMAND PORTAL</h2>
-          <p className="lock-desc">Enter authorization PIN to access order management & payment screenshots.</p>
-
-          <form onSubmit={handleLogin}>
-            <input 
-              type="password" 
-              className="lock-input" 
-              placeholder="••••••••" 
-              value={pinInput}
-              onChange={(e) => setPinInput(e.target.value)}
-              autoFocus
-            />
-            <button type="submit" className="admin-btn admin-btn-primary" style={{ width: '100%', height: '48px', justifyContent: 'center' }}>
-              <i className="fa-solid fa-unlock-keyhole"></i> AUTHENTICATE
-            </button>
-            {authError && (
-              <div className="lock-error" style={{ display: 'block' }}>
-                <i className="fa-solid fa-triangle-exclamation"></i> Access Denied: Incorrect PIN
-              </div>
-            )}
-          </form>
-
-          <div style={{ marginTop: '20px' }}>
-            <button 
-              onClick={handleGoToStorefront}
-              style={{ background: 'transparent', border: 'none', fontSize: '0.8rem', color: 'var(--admin-text-dim)', textDecoration: 'underline', cursor: 'pointer' }}
-            >
-              &larr; Return to Customer Storefront
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // Dashboard calculations
-  const totalRevenue = orders.reduce((sum, o) => sum + (o.total || 0), 0);
-  const pendingReceipts = orders.filter(o => o.hasReceipt && o.status === 'Receipt Submitted').length;
+  const totalRevenue = orders.filter((o) => o.paymentStatus === 'verified' || (o.paymentCode === 'cod' && o.orderStatus === 'delivered')).reduce((sum, o) => sum + (o.total || 0), 0);
+  const pendingReceipts = orders.filter(o => o.hasReceipt && o.paymentStatus === 'receipt_submitted').length;
   const dispatchedCount = orders.filter(o => o.status === 'Dispatched' || o.status === 'Delivered').length;
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--admin-bg)', color: 'var(--admin-text-soft)' }}>
+    <div className="admin-dashboard-shell">
       {/* Top Header */}
       <header className="admin-header">
         <div className="admin-nav">
@@ -310,6 +186,18 @@ export default function AdminDashboard() {
           </div>
 
           <div className="admin-top-actions">
+            <button onClick={() => setActiveSection('orders')} className={`admin-btn ${activeSection === 'orders' ? 'admin-btn-primary' : 'admin-btn-secondary'}`}>
+              <i className="fa-solid fa-box-archive"></i> Orders
+            </button>
+            <button onClick={() => setActiveSection('products')} className={`admin-btn ${activeSection === 'products' ? 'admin-btn-primary' : 'admin-btn-secondary'}`}>
+              <i className="fa-solid fa-gamepad"></i> Products
+            </button>
+            <button onClick={() => setActiveSection('customers')} className={`admin-btn ${activeSection === 'customers' ? 'admin-btn-primary' : 'admin-btn-secondary'}`}>
+              <i className="fa-solid fa-users"></i> Customers
+            </button>
+            <button onClick={() => setActiveSection('reviews')} className={`admin-btn ${activeSection === 'reviews' ? 'admin-btn-primary' : 'admin-btn-secondary'}`}>
+              <i className="fa-solid fa-star"></i> Reviews
+            </button>
             <button 
               onClick={handleGoToStorefront} 
               className="admin-btn admin-btn-secondary" 
@@ -335,8 +223,14 @@ export default function AdminDashboard() {
         </div>
       </header>
 
+      {activeSection === 'products' && <main className="admin-container">
+        <AdminProducts triggerToast={triggerToast}/>
+      </main>}
+      {activeSection === 'customers' && <main className="admin-container"><AdminCustomers triggerToast={triggerToast}/></main>}
+      {activeSection === 'reviews' && <main className="admin-container"><AdminReviews triggerToast={triggerToast}/></main>}
+
       {/* Main Container */}
-      <main className="admin-container">
+      <main className="admin-container" style={{ display: activeSection === 'orders' ? 'block' : 'none' }}>
         {/* Stats Grid */}
         <section className="admin-stats-grid">
           <div className="stat-card">
@@ -344,7 +238,7 @@ export default function AdminDashboard() {
               <span className="stat-title">GROSS SALES VOLUME</span>
               <div className="stat-icon cyan"><i className="fa-solid fa-coins"></i></div>
             </div>
-            <div className="stat-value">Rs. {totalRevenue.toLocaleString()}</div>
+            <div className="stat-value" style={{ color: 'var(--admin-cyan)' }}>Rs. {totalRevenue.toLocaleString()}</div>
             <div className="stat-subtext">All submitted orders in pipeline</div>
           </div>
 
@@ -353,11 +247,11 @@ export default function AdminDashboard() {
               <span className="stat-title">TOTAL ORDERS</span>
               <div className="stat-icon blue"><i className="fa-solid fa-box-archive"></i></div>
             </div>
-            <div className="stat-value">{orders.length}</div>
+            <div className="stat-value" style={{ color: 'var(--admin-blue)' }}>{orders.length}</div>
             <div className="stat-subtext">Lifetime store bookings</div>
           </div>
 
-          <div className="stat-card" style={{ borderColor: 'rgba(255, 184, 0, 0.4)' }}>
+          <div className="stat-card" style={{ borderColor: 'rgba(255, 184, 0, 0.6)', background: 'linear-gradient(135deg, rgba(32, 28, 16, 0.95) 0%, rgba(18, 16, 10, 0.98) 100%)' }}>
             <div className="stat-card-header">
               <span className="stat-title" style={{ color: 'var(--admin-amber)' }}>AWAITING SS REVIEW</span>
               <div className="stat-icon amber"><i className="fa-solid fa-image"></i></div>
@@ -366,9 +260,9 @@ export default function AdminDashboard() {
             <div className="stat-subtext">Advance payment receipts to confirm</div>
           </div>
 
-          <div className="stat-card">
+          <div className="stat-card" style={{ borderColor: 'rgba(0, 255, 157, 0.5)' }}>
             <div className="stat-card-header">
-              <span className="stat-title">DISPATCHED / DELIVERED</span>
+              <span className="stat-title" style={{ color: 'var(--admin-green)' }}>DISPATCHED / DELIVERED</span>
               <div className="stat-icon green"><i className="fa-solid fa-truck-fast"></i></div>
             </div>
             <div className="stat-value" style={{ color: 'var(--admin-green)' }}>{dispatchedCount}</div>
@@ -389,8 +283,8 @@ export default function AdminDashboard() {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            <button onClick={addManualOrder} className="admin-btn admin-btn-primary" type="button">
-              <i className="fa-solid fa-plus"></i> + Add Test Order
+            <button onClick={loadOrders} className="admin-btn admin-btn-primary" type="button">
+              <i className="fa-solid fa-rotate"></i> Refresh Orders
             </button>
           </div>
 
@@ -411,7 +305,7 @@ export default function AdminDashboard() {
               className={`admin-pill ${activeFilter === 'verified' ? 'active' : ''}`}
               onClick={() => setActiveFilter('verified')}
             >
-              <i className="fa-solid fa-circle-check"></i> Advance Verified <span className="pill-count">{orders.filter(o => o.status === 'Advance Verified').length}</span>
+              <i className="fa-solid fa-circle-check"></i> Payment Verified <span className="pill-count">{orders.filter(o => o.paymentStatus === 'verified').length}</span>
             </button>
             <button 
               className={`admin-pill ${activeFilter === 'cod' ? 'active' : ''}`}
@@ -463,7 +357,7 @@ export default function AdminDashboard() {
                   else if (order.status === 'Cancelled') statusClass = 'status-cancelled';
 
                   return (
-                    <tr key={order.orderRef} className={`order-row ${order.receiptDataUrl && order.status === 'Receipt Submitted' ? 'row-highlight-review' : ''}`}>
+                    <tr key={order.orderRef} className={`order-row ${order.receiptDataUrl && order.paymentStatus === 'receipt_submitted' ? 'row-highlight-review' : ''}`}>
                       {/* 1. Order ID & Date */}
                       <td>
                         <div className="order-ref-badge">
@@ -527,7 +421,7 @@ export default function AdminDashboard() {
                       <td>
                         {order.receiptDataUrl ? (
                           <button 
-                            className={`ss-preview-card ${order.status === 'Receipt Submitted' ? 'glow-amber' : 'glow-cyan'}`} 
+                            className={`ss-preview-card ${order.paymentStatus === 'receipt_submitted' ? 'glow-amber' : 'glow-cyan'}`}
                             onClick={() => { setActiveSSOrder(order); setZoomLevel(1); }}
                           >
                             <div className="ss-thumb-wrapper">
@@ -548,15 +442,29 @@ export default function AdminDashboard() {
                         <div className="status-selector-wrap">
                           <select 
                             className={`status-select-enhanced ${statusClass}`}
-                            value={order.status}
+                            value={order.orderStatus}
                             onChange={(e) => updateOrderStatus(order.orderRef, e.target.value)}
                           >
-                            <option value="Receipt Submitted">🟡 Review Receipt</option>
-                            <option value="Advance Verified">🟢 Advance Verified</option>
-                            <option value="Confirmed (COD)">⚪ Confirmed (COD)</option>
-                            <option value="Dispatched">🔵 Dispatched</option>
-                            <option value="Delivered">🟣 Delivered</option>
-                            <option value="Cancelled">🔴 Cancelled</option>
+                            <option value="placed">🟡 Order Placed</option>
+                            <option value="confirmed">⚪ Confirmed</option>
+                            <option value="processing">🟠 Processing</option>
+                            <option value="dispatched">🔵 Dispatched</option>
+                            <option value="delivered">🟣 Delivered</option>
+                            <option value="cancelled">🔴 Cancelled</option>
+                          </select>
+                          <select
+                            className="tracking-code-field"
+                            value={order.courier || ''}
+                            onChange={(e) => updateOrderTracking(order.orderRef, order.trackingNumber, e.target.value)}
+                            aria-label="Courier"
+                          >
+                            <option value="">Select courier</option>
+                            <option value="TCS Pakistan">TCS Pakistan</option>
+                            <option value="Leopards Courier">Leopards Courier</option>
+                            <option value="M&P Courier">M&P Courier</option>
+                            <option value="PostEx">PostEx</option>
+                            <option value="Trax">Trax</option>
+                            <option value="Other">Other</option>
                           </select>
                           <div className="tracking-input-group">
                             <i className="fa-solid fa-truck-fast"></i>
@@ -564,7 +472,7 @@ export default function AdminDashboard() {
                               type="text" 
                               defaultValue={order.trackingNumber || ''} 
                               placeholder="Tracking ID..." 
-                              onBlur={(e) => updateOrderTracking(order.orderRef, e.target.value)}
+                              onBlur={(e) => { if (e.target.value !== order.trackingNumber) updateOrderTracking(order.orderRef, e.target.value, order.courier); }}
                               className="tracking-code-field"
                             />
                           </div>
@@ -585,9 +493,9 @@ export default function AdminDashboard() {
                           <button 
                             className="btn-action-delete" 
                             onClick={() => deleteOrder(order.orderRef)} 
-                            title="Delete Order"
+                            title="Cancel Order"
                           >
-                            <i className="fa-solid fa-trash-can"></i>
+                            <i className="fa-solid fa-ban"></i>
                           </button>
                         </div>
                       </td>
@@ -639,7 +547,7 @@ export default function AdminDashboard() {
               <div style={{ fontSize: '0.85rem', lineHeight: '1.4' }}>
                 <div><strong>Customer:</strong> {activeSSOrder.customer.fullName} ({activeSSOrder.customer.whatsapp})</div>
                 <div><strong>Total:</strong> Rs. {activeSSOrder.total.toLocaleString()} | <strong>Mode:</strong> {activeSSOrder.paymentMethod}</div>
-                <div style={{ marginTop: '4px' }}><strong>Status:</strong> <span style={{ color: 'var(--admin-cyan)' }}>{activeSSOrder.status}</span></div>
+                <div style={{ marginTop: '4px' }}><strong>Order:</strong> <span style={{ color: 'var(--admin-cyan)' }}>{activeSSOrder.status}</span> · <strong>Payment:</strong> {activeSSOrder.paymentStatus?.replaceAll('_', ' ')}</div>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -671,11 +579,21 @@ export default function AdminDashboard() {
                   className="admin-btn admin-btn-primary" 
                   style={{ background: 'var(--admin-green)', color: '#02070D' }}
                   onClick={() => {
-                    updateOrderStatus(activeSSOrder.orderRef, 'Advance Verified');
+                    updatePaymentStatus(activeSSOrder, 'verified');
                     setActiveSSOrder(null);
                   }}
                 >
                   <i className="fa-solid fa-check-double"></i> Mark Advance Verified
+                </button>
+
+                <button
+                  className="admin-btn admin-btn-danger"
+                  onClick={() => {
+                    updatePaymentStatus(activeSSOrder, 'rejected');
+                    setActiveSSOrder(null);
+                  }}
+                >
+                  <i className="fa-solid fa-xmark"></i> Reject Receipt
                 </button>
 
                 <button 
@@ -706,16 +624,16 @@ export default function AdminDashboard() {
             <div className="confirm-icon-box">
               <i className="fa-solid fa-triangle-exclamation"></i>
             </div>
-            <div className="confirm-title">DELETE ORDER RECORD</div>
+            <div className="confirm-title">CANCEL ORDER</div>
             <div className="confirm-desc">
-              Are you sure you want to permanently delete order <strong style={{ color: 'var(--admin-cyan)' }}>#{confirmDeleteRef}</strong>? This action cannot be reversed.
+              Cancel order <strong style={{ color: 'var(--admin-cyan)' }}>#{confirmDeleteRef}</strong>? The record will be retained for reporting and customer support.
             </div>
             <div className="confirm-actions">
               <button className="confirm-btn-cancel" onClick={() => setConfirmDeleteRef(null)}>
                 CANCEL
               </button>
               <button className="confirm-btn-delete" onClick={handleConfirmDelete}>
-                DELETE PERMANENTLY
+                CANCEL ORDER
               </button>
             </div>
           </div>

@@ -1,8 +1,10 @@
 import React from 'react';
 import { useCart } from '../context/CartContext';
+import { useNavigate } from 'react-router-dom';
 
 export default function OrderSuccessModal() {
   const { isSuccessOpen, closeSuccess, completedOrder } = useCart();
+  const navigate = useNavigate();
 
   if (!isSuccessOpen || !completedOrder) return null;
 
@@ -83,8 +85,10 @@ export default function OrderSuccessModal() {
         <div style={{ marginBottom: '24px', fontSize: '0.9rem', lineHeight: 1.6, color: 'var(--text-soft)' }}>
           <p>Thank you, <strong style={{ color: '#fff' }}>{order.customer.fullName}</strong>! Your order has been placed in queue.</p>
           <p style={{ marginTop: '6px' }}>Total: <strong style={{ color: 'var(--cyan)' }}>Rs. {order.total.toLocaleString()}</strong> ({order.paymentMethod}).</p>
+          <p style={{ marginTop: '6px' }}>Payment: <strong>{order.paymentStatus?.replace('_', ' ') || 'pending'}</strong>. Track anytime using this Order ID plus your checkout phone or email.</p>
           <p style={{ marginTop: '6px' }}>Click below to dispatch your order details instantly to our WhatsApp logistics team.</p>
         </div>
+        {order.warning && <div className="auth-alert error" style={{ marginBottom: '18px', textAlign: 'left' }}>{order.warning}</div>}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {order.whatsappUrl && (
@@ -105,6 +109,9 @@ export default function OrderSuccessModal() {
           >
             <i className="fa-solid fa-file-invoice"></i> DOWNLOAD OFFICIAL INVOICE (.TXT)
           </button>
+          {order.isGuest && <button type="button" onClick={() => { closeSuccess(); navigate('/signup?return=/account'); }} className="btn-cyber-secondary cyber-cut-sm" style={{ height: '44px' }}>
+            <i className="fa-solid fa-user-plus"></i> CREATE AN ACCOUNT (OPTIONAL)
+          </button>}
         </div>
       </div>
     </div>

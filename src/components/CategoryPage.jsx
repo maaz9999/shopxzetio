@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import PRODUCTS from '../data/products';
 import ProductCard from './ProductCard';
 import { useCart } from '../context/CartContext';
+import { useCatalog } from '../context/CatalogContext';
 
 export default function CategoryPage({ categoryKey, title, subtitle, icon }) {
   const { setCurrentView } = useCart();
+  const { products: PRODUCTS } = useCatalog();
   const [subCategory, setSubCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortOption, setSortOption] = useState('featured');
@@ -25,7 +26,7 @@ export default function CategoryPage({ categoryKey, title, subtitle, icon }) {
       return PRODUCTS.filter(p => p.category.toLowerCase().includes('sleeve') || p.category.toLowerCase().includes('fan') || p.category.toLowerCase().includes('accessories'));
     }
     return PRODUCTS.filter(p => p.category.toLowerCase() === categoryKey.toLowerCase());
-  }, [categoryKey]);
+  }, [PRODUCTS, categoryKey]);
 
   // Extract unique subcategories
   const availableSubCategories = useMemo(() => {
